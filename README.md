@@ -1,5 +1,5 @@
 # oknav3
-一个NAS导航，使用layui+php+vue+bootstrap
+一个NAS导航，使用layui+php+vue+bootstrap+sqlite
 ## 忘记密码
 使用 fix_database.php文件重置
 用户名admin
