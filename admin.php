@@ -88,6 +88,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// 处理主题设置
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_theme' && $_SESSION['admin_logged_in']) {
+    $theme = $_POST['theme'] ?? 'light';
+    
+    // 更新配置表中的主题设置
+    $stmt = $db->prepare('UPDATE config SET theme = :theme');
+    $stmt->bindValue(':theme', $theme, SQLITE3_TEXT);
+    $stmt->execute();
+    
+    header('Location: admin.php');
+    exit;
+}
+
 // 处理分类管理和链接管理
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSION['admin_logged_in']) {
     // 分类管理
@@ -195,6 +208,13 @@ $categories = [];
 $categoriesResult = $db->query('SELECT * FROM categories ORDER BY sort_order ASC');
 while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
     $categories[] = $category;
+}
+
+// 获取当前主题设置
+$currentTheme = 'light';
+$themeResult = $db->querySingle('SELECT theme FROM config LIMIT 1', true);
+if ($themeResult) {
+    $currentTheme = $themeResult['theme'];
 }
 ?>
 <!DOCTYPE html>
@@ -456,6 +476,53 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
             color: white;
         }
         
+        /* 主题预览样式 */
+        .theme-preview {
+            margin: 20px 0;
+        }
+        
+        .preview-container {
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            padding: 15px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: all 0.3s ease;
+        }
+        
+        .preview-header {
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+            color: var(--primary-color);
+        }
+        
+        .preview-items {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .preview-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: var(--card-bg);
+            padding: 10px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            min-width: 80px;
+            text-align: center;
+        }
+        
+        .preview-item i {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+            color: var(--primary-color);
+        }
+        
         /* 响应式设计 */
         @media (max-width: 768px) {
             .admin-header {
@@ -482,7 +549,13 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
             }
             
             .btn-group {
-                flex-direction: column;
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            
+            .btn-group .btn:only-child {
+                grid-column: span 2;
             }
             
             .category-form, .link-form {
@@ -495,7 +568,7 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
             }
             
             .link-list, .link-list tbody, .link-list tr, .link-list td {
-                display: block;
+                display: inline-grid;
                 width: 100%;
             }
             
@@ -523,7 +596,7 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
                 position: absolute;
                 left: 10px;
                 width: 45%;
-                padding-right: 10px;
+                padding: 5% 0;
                 white-space: nowrap;
                 text-align: left;
                 font-weight: bold;
@@ -683,8 +756,38 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
             <div class="admin-nav">
                 <a href="#" id="category-tab" onclick="showTab('category')">分类管理</a>
                 <a href="#" id="link-tab" onclick="showTab('link')" class="active">链接管理</a>
+                <a href="#" id="theme-tab" onclick="showTab('theme')">主题设置</a>
                 <a href="#" onclick="showUserSettings()">账户设置</a>
                 <a href="#" onclick="showIconSelector()">图标设置</a>
+            </div>
+            
+            <!-- 主题设置部分 -->
+            <div id="theme-section" style="display: none;">
+                <h2>主题设置</h2>
+                <form class="category-form" method="post" action="admin.php">
+                    <input type="hidden" name="action" value="save_theme">
+                    <div class="form-group">
+                        <label>选择主题</label>
+                        <select name="theme" id="theme-selector" onchange="previewTheme(this.value)">
+                            <option value="light" <?= $currentTheme === 'light' ? 'selected' : '' ?>>默认主题</option>
+                            <option value="dark" <?= $currentTheme === 'dark' ? 'selected' : '' ?>>暗黑主题</option>
+                            <option value="blue" <?= $currentTheme === 'blue' ? 'selected' : '' ?>>蓝色主题</option>
+                            <option value="chinese" <?= $currentTheme === 'chinese' ? 'selected' : '' ?>>中国风主题</option>
+                        </select>
+                    </div>
+                    <div class="theme-preview">
+                        <h3>主题预览</h3>
+                        <div class="preview-container" data-theme="<?= $currentTheme ?>">
+                            <div class="preview-header">导航标题</div>
+                            <div class="preview-items">
+                                <div class="preview-item"><i class="bi bi-house"></i><span>首页</span></div>
+                                <div class="preview-item"><i class="bi bi-search"></i><span>搜索</span></div>
+                                <div class="preview-item"><i class="bi bi-book"></i><span>文档</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存主题设置</button>
+                </form>
             </div>
             
             <!-- 分类管理部分 -->
@@ -959,10 +1062,12 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
         // 隐藏所有内容区域
         document.getElementById('category-section').style.display = 'none';
         document.getElementById('link-section').style.display = 'none';
+        document.getElementById('theme-section').style.display = 'none';
         
         // 移除所有标签的活动状态
         document.getElementById('category-tab').classList.remove('active');
         document.getElementById('link-tab').classList.remove('active');
+        document.getElementById('theme-tab').classList.remove('active');
         
         // 显示选中的内容区域并激活对应标签
         if (tabName === 'category') {
@@ -971,6 +1076,9 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
         } else if (tabName === 'link') {
             document.getElementById('link-section').style.display = 'block';
             document.getElementById('link-tab').classList.add('active');
+        } else if (tabName === 'theme') {
+            document.getElementById('theme-section').style.display = 'block';
+            document.getElementById('theme-tab').classList.add('active');
         }
     }
     
@@ -993,6 +1101,12 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
         
         // 滚动到编辑表单
         document.getElementById('editLinkForm').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // 预览主题
+    function previewTheme(theme) {
+        const previewContainer = document.querySelector('.preview-container');
+        previewContainer.setAttribute('data-theme', theme);
     }
     
     // 按分类筛选链接
