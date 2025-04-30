@@ -9,6 +9,9 @@
 （线上我肯定改过了，你就别去瞎搞了）
 ## layui引用
 项目里面已经有了layui，版本2.11.0
+## 数据库sqlite
+/date/nav.db
+如果不会就去找 fix_database.php 文件，里面有表结构
 ## 强调：缺少bootstrap icon文件
 bootstrap icon下载网址：https://icons.getbootstrap.com/
 由于bootstrap icon文件太大，上传文件出错，缺少 bootstrap icon文件，自己去下载吧。
@@ -16,7 +19,7 @@ bootstrap icon下载网址：https://icons.getbootstrap.com/
 https://github.com/zhaosay/oknav3/releases/tag/nav
 
 ## 引入路径
-    <link rel="stylesheet" href="/bootstrap-icons/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="bootstrap-icons/font/bootstrap-icons.css">
     <link rel="stylesheet" href="layui/css/layui.css">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="bootstrap-icons/reception-4.svg" type="image/svg+xml">
