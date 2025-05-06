@@ -12,8 +12,12 @@ $db = new SQLite3('data/nav.db');
 $db->exec('CREATE TABLE IF NOT EXISTS config (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
-    theme TEXT NOT NULL
+    theme TEXT NOT NULL,
+    description TEXT,  
+    keywords TEXT      
 )');
+
+
 
 $db->exec('CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +40,18 @@ $db->exec('CREATE TABLE IF NOT EXISTS users (
     password TEXT NOT NULL
 )');
 
+// 创建config表（包含TDK和自定义主题字段）
+$db->exec('CREATE TABLE IF NOT EXISTS config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    theme TEXT NOT NULL,
+    description TEXT,
+    keywords TEXT,
+    custom_colors TEXT  -- 用于存储自定义配色
+)');
+
 // 读取配置
-$config = ['title' => '我的导航', 'theme' => 'light', 'items' => []];
+$config = ['title' => '我的导航', 'theme' => 'light', 'description' => '', 'keywords' => '', 'custom_colors' => null, 'items' => []];
 
 // 检查是否有配置数据
 $result = $db->querySingle('SELECT COUNT(*) FROM config', true);
@@ -48,7 +62,7 @@ if ($result['COUNT(*)'] == 0) {
     // 插入默认项目
     $defaultItems = [
         ['name' => '三五二萌文网', 'url' => 'https://www.352m.com', 'icon' => 'search'],
-        ['name' => 'GitHub', 'url' => 'https://github.com', 'icon' => 'github']
+        ['name' => 'Ok导航-OkNav', 'url' => 'https://cc.352m.com', 'icon' => 'search']
     ];
     
     foreach ($defaultItems as $item) {
@@ -63,6 +77,9 @@ if ($result['COUNT(*)'] == 0) {
 $configRow = $db->querySingle('SELECT * FROM config LIMIT 1', true);
 $config['title'] = $configRow['title'];
 $config['theme'] = $configRow['theme'];
+$config['description'] = $configRow['description'] ?? '';  // 获取description
+$config['keywords'] = $configRow['keywords'] ?? '';        // 获取keywords
+$config['custom_colors'] = $configRow['custom_colors'] ?? null;  // 获取自定义主题配色
 
 // 获取分类列表
 $categoriesResult = $db->query('SELECT * FROM categories ORDER BY sort_order ASC');
@@ -75,7 +92,9 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
 $config['items'] = [];
 foreach ($config['categories'] as $category) {
     $categoryId = $category['id'];
-    $itemsResult = $db->query('SELECT * FROM items WHERE category_id = ' . $categoryId);
+    $stmt = $db->prepare('SELECT * FROM items WHERE category_id = :category_id');
+    $stmt->bindValue(':category_id', $categoryId, SQLITE3_INTEGER);
+    $itemsResult = $stmt->execute();
     while ($item = $itemsResult->fetchArray(SQLITE3_ASSOC)) {
         $config['items'][] = $item;
     }
@@ -86,14 +105,27 @@ foreach ($config['categories'] as $category) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="description" content="个人导航页面 - <?= $config['title'] ?>">
-    <meta name="theme-color" content="#4285f4">
-    <title><?= $config['title'] ?></title>
-    <link rel="stylesheet" href="/bootstrap-icons/font/bootstrap-icons.css">
+    <meta name="description" content="<?= htmlspecialchars($config['description']) ?>">  <!-- 输出description -->
+    <meta name="keywords" content="<?= htmlspecialchars($config['keywords']) ?>">        <!-- 输出keywords -->
+    <title><?= htmlspecialchars($config['title']) ?></title>
+    <link rel="stylesheet" href="bootstrap-icons/font/bootstrap-icons.css">
     <link rel="stylesheet" href="layui/css/layui.css">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="bootstrap-icons/reception-4.svg" type="image/svg+xml">
     <style>
+        <?php if ($config['theme'] === 'custom' && !empty($config['custom_colors'])): 
+            $colors = json_decode($config['custom_colors'], true);
+            if ($colors && is_array($colors)): ?>
+        :root {
+            --bg-color: <?= $colors['bg-color'] ?? '#f5f7fa' ?>;
+            --text-color: <?= $colors['text-color'] ?? '#333' ?>;
+            --primary-color: <?= $colors['primary-color'] ?? '#4285f4' ?>;
+            --card-bg: <?= $colors['card-bg'] ?? '#fff' ?>;
+            --shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        <?php endif; 
+        endif; ?>
+        
         .nav-container {
             display: flex;
             flex-direction: column;

@@ -11,6 +11,14 @@ function log_error($message) {
     file_put_contents('error.log', date('Y-m-d H:i:s') . ' - ' . $message . "\n", FILE_APPEND);
 }
 
+// 获取TDK（标题、描述、关键词）内容
+function get_tdk() {
+    global $db;
+    $result = $db->query('SELECT title, description, keywords FROM config LIMIT 1');
+    $tdk = $result->fetchArray(SQLITE3_ASSOC);
+    return $tdk ?: ['title' => '', 'description' => '', 'keywords' => ''];
+}
+
 // 连接数据库
 $db = new SQLite3('data/nav.db');
 if (!$db) {
@@ -92,9 +100,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_theme' && $_SESSION['admin_logged_in']) {
     $theme = $_POST['theme'] ?? 'light';
     
+    // 处理自定义主题颜色
+    $custom_colors = null;
+    if ($theme === 'custom' && isset($_POST['custom_colors']) && is_array($_POST['custom_colors'])) {
+        $custom_colors = json_encode($_POST['custom_colors']);
+    }
+    
     // 更新配置表中的主题设置
-    $stmt = $db->prepare('UPDATE config SET theme = :theme');
+    $stmt = $db->prepare('UPDATE config SET theme = :theme, custom_colors = :custom_colors');
     $stmt->bindValue(':theme', $theme, SQLITE3_TEXT);
+    $stmt->bindValue(':custom_colors', $custom_colors, SQLITE3_TEXT);
+    $stmt->execute();
+    
+    header('Location: admin.php');
+    exit;
+}
+
+// 处理TDK设置
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_tdk' && $_SESSION['admin_logged_in']) {
+    $title = $_POST['title'] ?? '';
+    $description = $_POST['description'] ?? '';
+    $keywords = $_POST['keywords'] ?? '';
+    
+    // 更新配置表中的TDK设置
+    $stmt = $db->prepare('UPDATE config SET title = :title, description = :description, keywords = :keywords');
+    $stmt->bindValue(':title', $title, SQLITE3_TEXT);
+    $stmt->bindValue(':description', $description, SQLITE3_TEXT);
+    $stmt->bindValue(':keywords', $keywords, SQLITE3_TEXT);
     $stmt->execute();
     
     header('Location: admin.php');
@@ -223,7 +255,7 @@ if ($themeResult) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>导航管理</title>
-    <link rel="stylesheet" href="/bootstrap-icons/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="bootstrap-icons/font/bootstrap-icons.css">
     <link rel="stylesheet" href="layui/css/layui.css">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="bootstrap-icons/reception-4.svg" type="image/svg+xml">
@@ -343,10 +375,25 @@ if ($themeResult) {
         }
         
         .form-group input:focus,
-        .form-group select:focus {
+        .form-group select:focus,
+        .form-group textarea:focus {
             border-color: var(--primary-color);
             outline: none;
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+        }
+        
+        .styled-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+            background-color: #fff;
+            color: #333;
         }
         
         .category-list, .link-list {
@@ -488,6 +535,67 @@ if ($themeResult) {
             background-color: var(--bg-color);
             color: var(--text-color);
             transition: all 0.3s ease;
+        }
+        
+        /* 自定义主题设置样式 */
+        #custom-theme-settings {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-top: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        #custom-theme-settings h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--dark-color);
+            font-size: 1.2rem;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        .color-settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .color-picker-group {
+            display: flex;
+            flex-direction: column;
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .color-picker-group label {
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--dark-color);
+        }
+        
+        .color-picker-group input[type="color"] {
+            width: 100%;
+            height: 40px;
+            padding: 2px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+        
+        .color-value {
+            font-family: monospace;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+            background-color: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 4px;
         }
         
         .preview-header {
@@ -757,6 +865,7 @@ if ($themeResult) {
                 <a href="#" id="category-tab" onclick="showTab('category')">分类管理</a>
                 <a href="#" id="link-tab" onclick="showTab('link')" class="active">链接管理</a>
                 <a href="#" id="theme-tab" onclick="showTab('theme')">主题设置</a>
+                <a href="#" id="tdk-tab" onclick="showTab('tdk')">TDK设置</a>
                 <a href="#" onclick="showUserSettings()">账户设置</a>
                 <a href="#" onclick="showIconSelector()">图标设置</a>
             </div>
@@ -764,7 +873,7 @@ if ($themeResult) {
             <!-- 主题设置部分 -->
             <div id="theme-section" style="display: none;">
                 <h2>主题设置</h2>
-                <form class="category-form" method="post" action="admin.php">
+                <form class="category-form" method="post" action="save.php">
                     <input type="hidden" name="action" value="save_theme">
                     <div class="form-group">
                         <label>选择主题</label>
@@ -773,7 +882,43 @@ if ($themeResult) {
                             <option value="dark" <?= $currentTheme === 'dark' ? 'selected' : '' ?>>暗黑主题</option>
                             <option value="blue" <?= $currentTheme === 'blue' ? 'selected' : '' ?>>蓝色主题</option>
                             <option value="chinese" <?= $currentTheme === 'chinese' ? 'selected' : '' ?>>中国风主题</option>
+                            <option value="custom" <?= $currentTheme === 'custom' ? 'selected' : '' ?>>自定义主题</option>
                         </select>
+                    </div>
+                    
+                    <!-- 自定义主题设置 -->
+                    <div id="custom-theme-settings" style="display: <?= $currentTheme === 'custom' ? 'block' : 'none' ?>">
+                        <h3>自定义主题颜色</h3>
+                        <?php
+                        // 获取自定义颜色设置
+                        $customColors = [];
+                        $customColorsResult = $db->querySingle('SELECT custom_colors FROM config LIMIT 1', true);
+                        if ($customColorsResult && !empty($customColorsResult['custom_colors'])) {
+                            $customColors = json_decode($customColorsResult['custom_colors'], true) ?: [];
+                        }
+                        ?>
+                        <div class="color-settings-grid">
+                            <div class="form-group color-picker-group">
+                                <label>主要颜色</label>
+                                <input type="color" name="custom_colors[primary-color]" value="<?= htmlspecialchars($customColors['primary-color'] ?? '#4285f4') ?>">
+                                <span class="color-value"><?= htmlspecialchars($customColors['primary-color'] ?? '#4285f4') ?></span>
+                            </div>
+                            <div class="form-group color-picker-group">
+                                <label>背景颜色</label>
+                                <input type="color" name="custom_colors[bg-color]" value="<?= htmlspecialchars($customColors['bg-color'] ?? '#f5f7fa') ?>">
+                                <span class="color-value"><?= htmlspecialchars($customColors['bg-color'] ?? '#f5f7fa') ?></span>
+                            </div>
+                            <div class="form-group color-picker-group">
+                                <label>卡片背景颜色</label>
+                                <input type="color" name="custom_colors[card-bg]" value="<?= htmlspecialchars($customColors['card-bg'] ?? '#ffffff') ?>">
+                                <span class="color-value"><?= htmlspecialchars($customColors['card-bg'] ?? '#ffffff') ?></span>
+                            </div>
+                            <div class="form-group color-picker-group">
+                                <label>文字颜色</label>
+                                <input type="color" name="custom_colors[text-color]" value="<?= htmlspecialchars($customColors['text-color'] ?? '#333333') ?>">
+                                <span class="color-value"><?= htmlspecialchars($customColors['text-color'] ?? '#333333') ?></span>
+                            </div>
+                        </div>
                     </div>
                     <div class="theme-preview">
                         <h3>主题预览</h3>
@@ -787,6 +932,32 @@ if ($themeResult) {
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">保存主题设置</button>
+                </form>
+            </div>
+            
+            <!-- TDK设置部分 -->
+            <div id="tdk-section" style="display: none;">
+                <h2>TDK设置</h2>
+                <form class="category-form" method="post" action="save.php">
+                    <input type="hidden" name="action" value="save_tdk">
+                    <?php
+                    // 获取TDK内容
+                    $tdk = get_tdk();
+                    ?>
+                    
+                    <div class="form-group">
+                        <label>首页标题 (Title)</label>
+                        <input type="text" name="title" value="<?= htmlspecialchars($tdk['title'] ?? '') ?>" placeholder="请输入网站标题" required>
+                    </div>
+                    <div class="form-group">
+                        <label>首页描述 (Description)</label>
+                        <textarea name="description" rows="3" placeholder="请输入网站描述" class="styled-textarea"><?= htmlspecialchars($tdk['description'] ?? '') ?></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>首页关键词 (Keywords)</label>
+                        <textarea name="keywords" rows="3" placeholder="请输入网站关键词，用逗号分隔" class="styled-textarea"><?= htmlspecialchars($tdk['keywords'] ?? '') ?></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存TDK设置</button>
                 </form>
             </div>
             
@@ -872,7 +1043,7 @@ if ($themeResult) {
                     </div>
                     <div class="form-group">
                         <label>图标名称 <small>(点击"图标设置"查看可用图标)</small></label>
-                        <input type="text" name="link_icon" required>
+                        <input type="text" name="link_icon" id="edit_link_icon" required>
                     </div>
                     <div class="form-group">
                         <label>所属分类</label>
@@ -931,9 +1102,9 @@ if ($themeResult) {
                     </tbody>
                 </table>
                 
-                <!-- 编辑链接的表单 (默认隐藏) -->
+                <!-- 编辑链接（修改）的表单 (默认隐藏) -->
                 <div id="editLinkForm" style="display: none;">
-                    <h2>编辑链接</h2>
+                    <h2>修改链接</h2>
                     <form class="link-form" method="post" action="admin.php">
                         <input type="hidden" name="action" value="edit_link">
                         <input type="hidden" name="link_id" id="edit_link_id">
@@ -947,7 +1118,7 @@ if ($themeResult) {
                         </div>
                         <div class="form-group">
                             <label>图标名称</label>
-                            <input type="text" name="link_icon" id="edit_link_icon" required>
+                            <input type="text" name="link_icon" id="edit_link_icon" onclick="hideIconSelector()"  required>
                         </div>
                         <div class="form-group">
                             <label>所属分类</label>
@@ -1021,7 +1192,7 @@ if ($themeResult) {
     </div>
     
     <!-- 图标选择器模态框 -->
-    <div id="iconSelectorModal">
+    <div id="iconSelectorModal" style="display: none;">
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
                 <h2>图标选择器</h2>
@@ -1063,11 +1234,13 @@ if ($themeResult) {
         document.getElementById('category-section').style.display = 'none';
         document.getElementById('link-section').style.display = 'none';
         document.getElementById('theme-section').style.display = 'none';
+        document.getElementById('tdk-section').style.display = 'none';
         
         // 移除所有标签的活动状态
         document.getElementById('category-tab').classList.remove('active');
         document.getElementById('link-tab').classList.remove('active');
         document.getElementById('theme-tab').classList.remove('active');
+        document.getElementById('tdk-tab').classList.remove('active');
         
         // 显示选中的内容区域并激活对应标签
         if (tabName === 'category') {
@@ -1079,6 +1252,9 @@ if ($themeResult) {
         } else if (tabName === 'theme') {
             document.getElementById('theme-section').style.display = 'block';
             document.getElementById('theme-tab').classList.add('active');
+        } else if (tabName === 'tdk') {
+            document.getElementById('tdk-section').style.display = 'block';
+            document.getElementById('tdk-tab').classList.add('active');
         }
     }
     
@@ -1090,7 +1266,7 @@ if ($themeResult) {
         document.getElementById('editCategoryForm').style.display = 'block';
     }
     
-    // 链接编辑函数
+    // 链接编辑（修改）函数
     function editLink(id, name, url, icon, categoryId) {
         document.getElementById('edit_link_id').value = id;
         document.getElementById('edit_link_name').value = name;
@@ -1107,7 +1283,34 @@ if ($themeResult) {
     function previewTheme(theme) {
         const previewContainer = document.querySelector('.preview-container');
         previewContainer.setAttribute('data-theme', theme);
+        
+        // 如果选择了自定义主题，显示自定义主题设置
+        var customThemeSettings = document.getElementById('custom-theme-settings');
+        if (customThemeSettings) {
+            customThemeSettings.style.display = theme === 'custom' ? 'block' : 'none';
+        }
     }
+    
+    // 更新颜色值显示
+    document.addEventListener('DOMContentLoaded', function() {
+        // 为所有颜色选择器添加事件监听
+        const colorInputs = document.querySelectorAll('.color-picker-group input[type="color"]');
+        colorInputs.forEach(input => {
+            // 初始化时更新一次颜色值显示
+            const colorValueSpan = input.nextElementSibling;
+            if (colorValueSpan && colorValueSpan.classList.contains('color-value')) {
+                colorValueSpan.textContent = input.value;
+            }
+            
+            // 添加change事件监听器
+            input.addEventListener('input', function() {
+                const colorValueSpan = this.nextElementSibling;
+                if (colorValueSpan && colorValueSpan.classList.contains('color-value')) {
+                    colorValueSpan.textContent = this.value;
+                }
+            });
+        });
+    })
     
     // 按分类筛选链接
     function filterLinks() {
@@ -1215,7 +1418,6 @@ if ($themeResult) {
             const iconElement = document.createElement('div');
             iconElement.className = 'icon-item';
             
-            // 使用CDN路径的Layui图标
             iconElement.innerHTML = `
                 <i class="layui-icon ${icon}" style="font-size: 24px;"></i>
                 <div style="font-size: 12px; margin-top: 5px; word-break: break-all;">${icon}</div>
@@ -1227,11 +1429,12 @@ if ($themeResult) {
                 if(document.getElementById('edit_link_icon')) {
                     document.getElementById('edit_link_icon').value = icon;
                 }
+                hideIconSelector();
             };
             
             layuiIconsContainer.appendChild(iconElement);
         });
-        
+
         // 添加Bootstrap图标
         bootstrapIconList.forEach(icon => {
             const iconElement = document.createElement('div');
@@ -1248,11 +1451,12 @@ if ($themeResult) {
                 if(document.getElementById('edit_link_icon')) {
                     document.getElementById('edit_link_icon').value = icon;
                 }
+                hideIconSelector();
             };
             
             bootstrapIconsContainer.appendChild(iconElement);
         });
-        
+
         // 添加搜索功能
         document.getElementById('iconSearch').addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
@@ -1278,7 +1482,7 @@ if ($themeResult) {
             });
         });
     }
-    
+
     // 复制图标名称到剪贴板
     function copyToClipboard(text) {
         const textarea = document.createElement('textarea');
@@ -1307,11 +1511,38 @@ if ($themeResult) {
         setTimeout(() => {
             document.body.removeChild(notification);
         }, 2000);
-        
-        // 自动关闭图标选择器
+    }
+
+    // 为图标名称输入框绑定点击事件
+    document.addEventListener('DOMContentLoaded', function() {
+        const iconInput = document.getElementById('edit_link_icon');
+        if (iconInput) {
+            iconInput.onclick = function() {
+                showIconSelector();
+            };
+        }
+    });
+
+    // 图标选择逻辑
+    function selectIcon(iconName) {
+        const iconInput = document.getElementById('edit_link_icon');
+        if (iconInput) {
+            iconInput.value = iconName;
+        }
         hideIconSelector();
     }
-    
+
+    // 修改图标选择器的点击事件处理
+    document.addEventListener('DOMContentLoaded', function() {
+        const iconItems = document.querySelectorAll('.icon-item');
+        iconItems.forEach(item => {
+            item.onclick = function() {
+                const iconName = this.querySelector('div').textContent;
+                selectIcon(iconName);
+            };
+        });
+    });
+
     <?php if (isset($passwordError) || isset($passwordSuccess)): ?>
     // 如果有密码相关的消息，自动显示用户设置模态框
     document.addEventListener('DOMContentLoaded', function() {
