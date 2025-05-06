@@ -1,7 +1,7 @@
 # oknav3
 一个NAS导航，直接放到里面就可以使用。
 ## 代码结构
-使用layui+php+vue+bootstrap+sqlite
+使用php+vue+bootstrap+layui+sqlite
 ## 忘记密码
 使用 fix_database.php文件重置
 用户名admin
@@ -11,10 +11,12 @@
 项目里面已经有了layui，版本2.11.0
 ## 数据库sqlite
 /date/nav.db
-如果不会就去找 fix_database.php 文件，里面有表结构
-## 强调：缺少bootstrap icon文件
+如果不会就去找 fix_database.php 文件，里面有表结构，也能修复之前错误的表结构，记得提前备份下，防止数据丢失
+## 强调：缺少bootstrap icon完整文件
 bootstrap icon下载网址：https://icons.getbootstrap.com/
-由于bootstrap icon文件太大，上传文件出错，缺少 bootstrap icon文件，自己去下载吧。
+由于bootstrap icon文件太大，自己去下载吧。
+本文只引入了bootstrap-icons/reception-4.svg，所以不需要太大的包
+
 或者直接去下载完整包
 https://github.com/zhaosay/oknav3/releases/tag/nav
 
