@@ -14,7 +14,7 @@ function log_error($message) {
 // 获取TDK（标题、描述、关键词）内容
 function get_tdk() {
     global $db;
-    $result = $db->query('SELECT title, description, keywords FROM config LIMIT 1');
+    $result = $db->query('SELECT title, description, keywords FROM tdk_config LIMIT 1');
     $tdk = $result->fetchArray(SQLITE3_ASSOC);
     return $tdk ?: ['title' => '', 'description' => '', 'keywords' => ''];
 }
@@ -99,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // 处理主题设置
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_theme' && $_SESSION['admin_logged_in']) {
     $theme = $_POST['theme'] ?? 'light';
+    $show_admin_icon = isset($_POST['show_admin_icon']) ? 1 : 0;
     
     // 处理自定义主题颜色
     $custom_colors = null;
@@ -106,10 +107,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $custom_colors = json_encode($_POST['custom_colors']);
     }
     
-    // 更新配置表中的主题设置
-    $stmt = $db->prepare('UPDATE config SET theme = :theme, custom_colors = :custom_colors');
+    // 检查theme_config表是否有show_admin_icon列
+    $result = $db->query("PRAGMA table_info(theme_config)");
+    $hasShowAdminIconField = false;
+    while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+        if ($column['name'] === 'show_admin_icon') {
+            $hasShowAdminIconField = true;
+            break;
+        }
+    }
+    
+    // 如果没有show_admin_icon列，则添加
+    if (!$hasShowAdminIconField) {
+        $db->exec("ALTER TABLE theme_config ADD COLUMN show_admin_icon INTEGER DEFAULT 1");
+    }
+    
+    // 更新主题配置表中的主题设置
+    $stmt = $db->prepare('UPDATE theme_config SET theme = :theme, custom_colors = :custom_colors, show_admin_icon = :show_admin_icon');
     $stmt->bindValue(':theme', $theme, SQLITE3_TEXT);
     $stmt->bindValue(':custom_colors', $custom_colors, SQLITE3_TEXT);
+    $stmt->bindValue(':show_admin_icon', $show_admin_icon, SQLITE3_INTEGER);
     $stmt->execute();
     
     header('Location: admin.php');
@@ -122,8 +139,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $description = $_POST['description'] ?? '';
     $keywords = $_POST['keywords'] ?? '';
     
-    // 更新配置表中的TDK设置
-    $stmt = $db->prepare('UPDATE config SET title = :title, description = :description, keywords = :keywords');
+    // 更新TDK配置表中的TDK设置
+    $stmt = $db->prepare('UPDATE tdk_config SET title = :title, description = :description, keywords = :keywords');
     $stmt->bindValue(':title', $title, SQLITE3_TEXT);
     $stmt->bindValue(':description', $description, SQLITE3_TEXT);
     $stmt->bindValue(':keywords', $keywords, SQLITE3_TEXT);
@@ -145,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSIO
             $stmt->bindValue(':name', $categoryName, SQLITE3_TEXT);
             $stmt->bindValue(':sort_order', $sortOrder, SQLITE3_INTEGER);
             $stmt->execute();
-            header('Location: admin.php');
+            header('Location: admin.php?tab=categories');
             exit;
         }
     } elseif ($_POST['action'] === 'edit_category') {
@@ -154,12 +171,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSIO
         $sortOrder = (int)($_POST['sort_order'] ?? 0);
         
         if ($categoryId > 0 && !empty($categoryName)) {
-            $stmt = $db->prepare('UPDATE categories SET name = :name, sort_order = :sort_order WHERE id = :id');
+            // 检查categories表是否有updated_at列
+            $result = $db->query("PRAGMA table_info(categories)");
+            $hasUpdatedAtField = false;
+            while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                if ($column['name'] === 'updated_at') {
+                    $hasUpdatedAtField = true;
+                    break;
+                }
+            }
+            
+            if ($hasUpdatedAtField) {
+                $stmt = $db->prepare('UPDATE categories SET name = :name, sort_order = :sort_order, updated_at = CURRENT_TIMESTAMP WHERE id = :id');
+            } else {
+                $stmt = $db->prepare('UPDATE categories SET name = :name, sort_order = :sort_order WHERE id = :id');
+            }
             $stmt->bindValue(':name', $categoryName, SQLITE3_TEXT);
             $stmt->bindValue(':sort_order', $sortOrder, SQLITE3_INTEGER);
             $stmt->bindValue(':id', $categoryId, SQLITE3_INTEGER);
             $stmt->execute();
-            header('Location: admin.php');
+            header('Location: admin.php?tab=categories');
             exit;
         }
     } elseif ($_POST['action'] === 'delete_category') {
@@ -175,7 +206,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSIO
             $stmt = $db->prepare('DELETE FROM categories WHERE id = :id');
             $stmt->bindValue(':id', $categoryId, SQLITE3_INTEGER);
             $stmt->execute();
-            header('Location: admin.php');
+            header('Location: admin.php?tab=categories');
+            exit;
+        }
+    } elseif ($_POST['action'] === 'update_category_order') {
+        // 处理分类排序
+        if (isset($_POST['category_order']) && is_array($_POST['category_order'])) {
+            foreach ($_POST['category_order'] as $position => $categoryId) {
+                // 检查categories表是否有updated_at列
+                $result = $db->query("PRAGMA table_info(categories)");
+                $hasUpdatedAtField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'updated_at') {
+                        $hasUpdatedAtField = true;
+                        break;
+                    }
+                }
+                
+                if ($hasUpdatedAtField) {
+                    $stmt = $db->prepare('UPDATE categories SET sort_order = :sort_order, updated_at = CURRENT_TIMESTAMP WHERE id = :id');
+                } else {
+                    $stmt = $db->prepare('UPDATE categories SET sort_order = :sort_order WHERE id = :id');
+                }
+                $stmt->bindValue(':sort_order', $position, SQLITE3_INTEGER);
+                $stmt->bindValue(':id', $categoryId, SQLITE3_INTEGER);
+                $stmt->execute();
+            }
+            echo json_encode(['success' => true]);
             exit;
         }
     }
@@ -185,35 +242,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSIO
         $linkName = $_POST['link_name'] ?? '';
         $linkUrl = $_POST['link_url'] ?? '';
         $linkIcon = $_POST['link_icon'] ?? '';
+        $linkDescription = $_POST['link_description'] ?? '';
         $categoryId = (int)($_POST['link_category_id'] ?? 1);
+        $sortOrder = (int)($_POST['sort_order'] ?? 0);
         
         if (!empty($linkName) && !empty($linkUrl) && !empty($linkIcon)) {
-            $stmt = $db->prepare('INSERT INTO items (name, url, icon, category_id) VALUES (:name, :url, :icon, :category_id)');
-            $stmt->bindValue(':name', $linkName, SQLITE3_TEXT);
-            $stmt->bindValue(':url', $linkUrl, SQLITE3_TEXT);
-            $stmt->bindValue(':icon', $linkIcon, SQLITE3_TEXT);
-            $stmt->bindValue(':category_id', $categoryId, SQLITE3_INTEGER);
-            $stmt->execute();
-            header('Location: admin.php');
-            exit;
+            try {
+                // 检查items表是否有description字段，如果没有则添加
+                $result = $db->query("PRAGMA table_info(items)");
+                $hasDescriptionField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'description') {
+                        $hasDescriptionField = true;
+                        break;
+                    }
+                }
+                
+                if (!$hasDescriptionField) {
+                    $db->exec("ALTER TABLE items ADD COLUMN description TEXT");
+                }
+                
+                // 准备SQL语句
+                $sql = 'INSERT INTO items (name, url, icon';
+                $params = [':name' => $linkName, ':url' => $linkUrl, ':icon' => $linkIcon];
+                
+                // 只有当description字段存在时才添加
+                if ($hasDescriptionField) {
+                    $sql .= ', description';
+                    $params[':description'] = $linkDescription;
+                }
+                
+                $sql .= ', category_id, sort_order) VALUES (:name, :url, :icon';
+                if ($hasDescriptionField) {
+                    $sql .= ', :description';
+                }
+                $sql .= ', :category_id, :sort_order)';
+                
+                $params[':category_id'] = $categoryId;
+                $params[':sort_order'] = $sortOrder;
+                
+                $stmt = $db->prepare($sql);
+                foreach ($params as $key => $value) {
+                    $type = is_int($value) ? SQLITE3_INTEGER : SQLITE3_TEXT;
+                    $stmt->bindValue($key, $value, $type);
+                }
+                
+                $stmt->execute();
+                header('Location: admin.php?tab=links');
+                exit;
+            } catch (Exception $e) {
+                log_error('添加链接错误: ' . $e->getMessage());
+                $linkError = '添加链接失败: ' . $e->getMessage();
+            }
         }
     } elseif ($_POST['action'] === 'edit_link') {
         $linkId = (int)($_POST['link_id'] ?? 0);
         $linkName = $_POST['link_name'] ?? '';
         $linkUrl = $_POST['link_url'] ?? '';
         $linkIcon = $_POST['link_icon'] ?? '';
+        $linkDescription = $_POST['link_description'] ?? '';
         $categoryId = (int)($_POST['link_category_id'] ?? 1);
+        $sortOrder = (int)($_POST['sort_order'] ?? 0);
         
         if ($linkId > 0 && !empty($linkName) && !empty($linkUrl) && !empty($linkIcon)) {
-            $stmt = $db->prepare('UPDATE items SET name = :name, url = :url, icon = :icon, category_id = :category_id WHERE id = :id');
-            $stmt->bindValue(':name', $linkName, SQLITE3_TEXT);
-            $stmt->bindValue(':url', $linkUrl, SQLITE3_TEXT);
-            $stmt->bindValue(':icon', $linkIcon, SQLITE3_TEXT);
-            $stmt->bindValue(':category_id', $categoryId, SQLITE3_INTEGER);
-            $stmt->bindValue(':id', $linkId, SQLITE3_INTEGER);
-            $stmt->execute();
-            header('Location: admin.php');
-            exit;
+            try {
+                // 检查items表是否有description字段，如果没有则添加
+                $result = $db->query("PRAGMA table_info(items)");
+                $hasDescriptionField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'description') {
+                        $hasDescriptionField = true;
+                        break;
+                    }
+                }
+                
+                if (!$hasDescriptionField) {
+                    $db->exec("ALTER TABLE items ADD COLUMN description TEXT");
+                }
+                
+                // 准备SQL语句
+                $sql = 'UPDATE items SET name = :name, url = :url, icon = :icon';
+                $params = [
+                    ':name' => $linkName, 
+                    ':url' => $linkUrl, 
+                    ':icon' => $linkIcon,
+                    ':category_id' => $categoryId,
+                    ':sort_order' => $sortOrder,
+                    ':id' => $linkId
+                ];
+                
+                // 只有当description字段存在时才添加
+                if ($hasDescriptionField) {
+                    $sql .= ', description = :description';
+                    $params[':description'] = $linkDescription;
+                }
+                
+                // 检查items表是否有updated_at列
+                $result = $db->query("PRAGMA table_info(items)");
+                $hasUpdatedAtField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'updated_at') {
+                        $hasUpdatedAtField = true;
+                        break;
+                    }
+                }
+                
+                if ($hasUpdatedAtField) {
+                    $sql .= ', category_id = :category_id, sort_order = :sort_order, updated_at = CURRENT_TIMESTAMP WHERE id = :id';
+                } else {
+                    $sql .= ', category_id = :category_id, sort_order = :sort_order WHERE id = :id';
+                }
+                
+                $stmt = $db->prepare($sql);
+                foreach ($params as $key => $value) {
+                    $type = is_int($value) ? SQLITE3_INTEGER : SQLITE3_TEXT;
+                    $stmt->bindValue($key, $value, $type);
+                }
+                
+                $stmt->execute();
+                header('Location: admin.php?tab=links');
+                exit;
+            } catch (Exception $e) {
+                log_error('编辑链接错误: ' . $e->getMessage());
+                $linkError = '编辑链接失败: ' . $e->getMessage();
+            }
         }
     } elseif ($_POST['action'] === 'delete_link') {
         $linkId = (int)($_POST['link_id'] ?? 0);
@@ -222,7 +374,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_SESSIO
             $stmt = $db->prepare('DELETE FROM items WHERE id = :id');
             $stmt->bindValue(':id', $linkId, SQLITE3_INTEGER);
             $stmt->execute();
-            header('Location: admin.php');
+            header('Location: admin.php?tab=links');
+            exit;
+        }
+    } elseif ($_POST['action'] === 'update_link_order') {
+        // 处理链接排序
+        if (isset($_POST['link_order']) && is_array($_POST['link_order'])) {
+            foreach ($_POST['link_order'] as $position => $linkId) {
+                // 检查items表是否有updated_at列
+                $result = $db->query("PRAGMA table_info(items)");
+                $hasUpdatedAtField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'updated_at') {
+                        $hasUpdatedAtField = true;
+                        break;
+                    }
+                }
+                
+                if ($hasUpdatedAtField) {
+                    $stmt = $db->prepare('UPDATE items SET sort_order = :sort_order, updated_at = CURRENT_TIMESTAMP WHERE id = :id');
+                } else {
+                    $stmt = $db->prepare('UPDATE items SET sort_order = :sort_order WHERE id = :id');
+                }
+                $stmt->bindValue(':sort_order', $position, SQLITE3_INTEGER);
+                $stmt->bindValue(':id', $linkId, SQLITE3_INTEGER);
+                $stmt->execute();
+            }
+            echo json_encode(['success' => true]);
             exit;
         }
     }
@@ -244,9 +422,36 @@ while ($category = $categoriesResult->fetchArray(SQLITE3_ASSOC)) {
 
 // 获取当前主题设置
 $currentTheme = 'light';
-$themeResult = $db->querySingle('SELECT theme FROM config LIMIT 1', true);
-if ($themeResult) {
-    $currentTheme = $themeResult['theme'];
+$customColors = [];
+$showAdminIcon = 1; // 默认显示管理图标
+
+// 从theme_config表读取主题设置
+// 首先检查theme_config表是否有show_admin_icon列
+$hasShowAdminIconField = false;
+$result = $db->query("PRAGMA table_info(theme_config)");
+while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+    if ($row['name'] === 'show_admin_icon') {
+        $hasShowAdminIconField = true;
+        break;
+    }
+}
+
+// 根据是否有show_admin_icon列构建查询
+if ($hasShowAdminIconField) {
+    $themeResult = $db->query('SELECT theme, custom_colors, show_admin_icon FROM theme_config LIMIT 1');
+} else {
+    $themeResult = $db->query('SELECT theme, custom_colors FROM theme_config LIMIT 1');
+}
+
+$themeData = $themeResult->fetchArray(SQLITE3_ASSOC);
+if ($themeData) {
+    $currentTheme = $themeData['theme'];
+    if (!empty($themeData['custom_colors'])) {
+        $customColors = json_decode($themeData['custom_colors'], true) ?: [];
+    }
+    if ($hasShowAdminIconField && isset($themeData['show_admin_icon'])) {
+        $showAdminIcon = (int)$themeData['show_admin_icon'];
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -257,8 +462,10 @@ if ($themeResult) {
     <title>导航管理</title>
     <link rel="stylesheet" href="bootstrap-icons/font/bootstrap-icons.css">
     <link rel="stylesheet" href="layui/css/layui.css">
+    <script src="layui/layui.js"></script>
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="bootstrap-icons/reception-4.svg" type="image/svg+xml">
+    <!-- 移除了Sortable.js库引用 -->
     <style>
         :root {
             --primary-color: #3498db;
@@ -337,6 +544,48 @@ if ($themeResult) {
             color: white;
         }
         
+        /* 分页样式 */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            margin-top: 20px;
+        }
+        
+        .per-page-selector {
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .per-page-selector span {
+            margin-right: 5px;
+        }
+        
+        .per-page-selector select {
+            padding: 5px;
+            border-radius: var(--border-radius);
+            border: 1px solid #ddd;
+        }
+        
+        /* 表格行样式，保持在一行 */
+        .category-list td, .link-list td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        
+        /* 时间显示样式 */
+        .time-info {
+            font-size: 0.8em;
+            color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
         .login-form {
             max-width: 400px;
             margin: 50px auto;
@@ -372,6 +621,19 @@ if ($themeResult) {
             border-radius: 4px;
             font-size: 16px;
             transition: border-color 0.3s;
+        }
+        
+        /* 图标选择器输入框样式 */
+        .icon-selector-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .icon-selector-input input {
+            flex: 1;
+        }
+        .icon-selector-input button {
+            white-space: nowrap;
         }
         
         .form-group input:focus,
@@ -477,6 +739,17 @@ if ($themeResult) {
         
         .link-list td a:hover {
             text-decoration: underline;
+        }
+        
+        .link-description {
+            margin-top: 5px;
+            font-size: 0.85em;
+            color: #666;
+            font-style: italic;
+            background-color: #f9f9f9;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border-left: 3px solid var(--primary-color);
         }
         
         #editLinkForm, #editCategoryForm {
@@ -862,10 +1135,15 @@ if ($themeResult) {
             </div>
             
             <div class="admin-nav">
-                <a href="#" id="category-tab" onclick="showTab('category')">分类管理</a>
-                <a href="#" id="link-tab" onclick="showTab('link')" class="active">链接管理</a>
-                <a href="#" id="theme-tab" onclick="showTab('theme')">主题设置</a>
-                <a href="#" id="tdk-tab" onclick="showTab('tdk')">TDK设置</a>
+                <?php
+                // 获取当前选中的选项卡
+                $currentTab = $_GET['tab'] ?? 'links';
+                ?>
+                <a href="admin.php?tab=categories" id="category-tab" data-tab="categories" class="<?= $currentTab === 'categories' ? 'active' : '' ?>">分类管理</a>
+                <a href="admin.php?tab=add_link" id="add-link-tab" data-tab="add_link" class="<?= $currentTab === 'add_link' ? 'active' : '' ?>">添加链接</a>
+                <a href="admin.php?tab=links" id="link-tab" data-tab="links" class="<?= $currentTab === 'links' ? 'active' : '' ?>">管理链接</a>
+                <a href="admin.php?tab=theme" id="theme-tab" data-tab="theme" class="<?= $currentTab === 'theme' ? 'active' : '' ?>">主题设置</a>
+                <a href="admin.php?tab=tdk" id="tdk-tab" data-tab="tdk" class="<?= $currentTab === 'tdk' ? 'active' : '' ?>">TDK设置</a>
                 <a href="#" onclick="showUserSettings()">账户设置</a>
                 <a href="#" onclick="showIconSelector()">图标设置</a>
             </div>
@@ -873,7 +1151,7 @@ if ($themeResult) {
             <!-- 主题设置部分 -->
             <div id="theme-section" style="display: none;">
                 <h2>主题设置</h2>
-                <form class="category-form" method="post" action="save.php">
+                <form class="category-form" method="post" action="admin.php">
                     <input type="hidden" name="action" value="save_theme">
                     <div class="form-group">
                         <label>选择主题</label>
@@ -886,16 +1164,21 @@ if ($themeResult) {
                         </select>
                     </div>
                     
+                    <!-- 管理图标设置 -->
+                    <div class="form-group">
+                        <label>首页管理图标</label>
+                        <div class="checkbox-group" >
+                            <input type="checkbox" id="show_admin_icon" name="show_admin_icon" <?= $showAdminIcon ? 'checked' : '' ?>>
+                            <label for="show_admin_icon">显示管理图标</label>
+                        </div>
+                    </div>
+                    
                     <!-- 自定义主题设置 -->
                     <div id="custom-theme-settings" style="display: <?= $currentTheme === 'custom' ? 'block' : 'none' ?>">
                         <h3>自定义主题颜色</h3>
                         <?php
-                        // 获取自定义颜色设置
-                        $customColors = [];
-                        $customColorsResult = $db->querySingle('SELECT custom_colors FROM config LIMIT 1', true);
-                        if ($customColorsResult && !empty($customColorsResult['custom_colors'])) {
-                            $customColors = json_decode($customColorsResult['custom_colors'], true) ?: [];
-                        }
+                        // 使用已经获取的自定义颜色设置
+                        // customColors变量已在页面顶部初始化
                         ?>
                         <div class="color-settings-grid">
                             <div class="form-group color-picker-group">
@@ -938,7 +1221,7 @@ if ($themeResult) {
             <!-- TDK设置部分 -->
             <div id="tdk-section" style="display: none;">
                 <h2>TDK设置</h2>
-                <form class="category-form" method="post" action="save.php">
+                <form class="category-form" method="post" action="admin.php">
                     <input type="hidden" name="action" value="save_tdk">
                     <?php
                     // 获取TDK内容
@@ -962,7 +1245,7 @@ if ($themeResult) {
             </div>
             
             <!-- 分类管理部分 -->
-            <div id="category-section" style="display: none;">
+            <div id="category-section" style="display: <?= $currentTab === 'categories' ? 'block' : 'none' ?>">
                 <h2>添加新分类</h2>
                 <form class="category-form" method="post" action="admin.php">
                     <input type="hidden" name="action" value="add_category">
@@ -984,15 +1267,23 @@ if ($themeResult) {
                             <th>ID</th>
                             <th>名称</th>
                             <th>排序</th>
+                            <th>创建/更新时间</th>
                             <th>操作</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="sortable-categories">
                         <?php foreach ($categories as $category): ?>
-                        <tr>
+                        <tr data-id="<?= $category['id'] ?>">
                             <td data-label="ID"><?= $category['id'] ?></td>
                             <td data-label="名称"><?= htmlspecialchars($category['name']) ?></td>
                             <td data-label="排序"><?= $category['sort_order'] ?></td>
+                            <td data-label="时间" class="time-info">
+                                <?php if($category['updated_at'] != $category['created_at']): ?>
+                                    更新: <?= $category['updated_at'] ?>
+                                <?php else: ?>
+                                    创建: <?= $category['created_at'] ?>
+                                <?php endif; ?>
+                            </td>
                             <td data-label="操作" class="btn-group">
                                 <button class="btn btn-primary" onclick="editCategory(<?= $category['id'] ?>, '<?= htmlspecialchars($category['name']) ?>', <?= $category['sort_order'] ?>)">编辑</button>
                                 <?php if ($category['id'] > 1): ?>
@@ -1007,6 +1298,9 @@ if ($themeResult) {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                <div class="form-group" style="margin-top: 20px;">
+                    <button id="save-category-order" class="btn btn-primary">保存排序</button>
+                </div>
                 
                 <!-- 编辑分类的表单 (默认隐藏) -->
                 <div id="editCategoryForm" style="display: none;">
@@ -1028,8 +1322,8 @@ if ($themeResult) {
                 </div>
             </div>
             
-            <!-- 链接管理部分 -->
-            <div id="link-section">
+            <!-- 添加链接部分 -->
+            <div id="add-link-section" style="display: <?= $currentTab === 'add_link' ? 'block' : 'none' ?>">
                 <h2>添加新链接</h2>
                 <form class="link-form" method="post" action="admin.php">
                     <input type="hidden" name="action" value="add_link">
@@ -1042,8 +1336,15 @@ if ($themeResult) {
                         <input type="url" name="link_url" required>
                     </div>
                     <div class="form-group">
-                        <label>图标名称 <small>(点击"图标设置"查看可用图标)</small></label>
-                        <input type="text" name="link_icon" id="edit_link_icon" required>
+                        <label>链接简介</label>
+                        <textarea name="link_description" class="styled-textarea" placeholder="请输入链接简介（选填）"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>图标选择 <small>(点击选择图标)</small></label>
+                        <div class="icon-selector-input">
+                            <input type="text" name="link_icon" id="add_link_icon" required>
+                            <button type="button" class="btn btn-secondary" onclick="showIconSelectorForInput('add_link_icon')">选择图标</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>所属分类</label>
@@ -1053,9 +1354,16 @@ if ($themeResult) {
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label>排序顺序</label>
+                        <input type="number" name="sort_order" value="0">
+                    </div>
                     <button type="submit" class="btn btn-primary">添加链接</button>
                 </form>
-                
+            </div>
+            
+            <!-- 链接管理部分 -->
+            <div id="link-section" style="display: <?= $currentTab === 'links' ? 'block' : 'none' ?>">
                 <h2>链接列表</h2>
                 <div class="link-filter">
                     <label>按分类筛选：</label>
@@ -1066,6 +1374,74 @@ if ($themeResult) {
                         <?php endforeach; ?>
                     </select>
                 </div>
+                
+                <?php
+                // 分页设置
+                $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+                $perPage = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 5; // 默认每页显示5个链接
+                $offset = ($page - 1) * $perPage;
+                
+                // 获取总链接数
+                $totalLinks = $db->querySingle('SELECT COUNT(*) FROM items');
+                $totalPages = ceil($totalLinks / $perPage);
+                ?>
+                <?php
+                // 检查items表是否有sort_order列和updated_at列，如果没有则添加
+                $result = $db->query("PRAGMA table_info(items)");
+                $hasSortOrderField = false;
+                $hasUpdatedAtField = false;
+                $hasCreatedAtField = false;
+                $hasDescriptionField = false;
+                while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+                    if ($column['name'] === 'sort_order') {
+                        $hasSortOrderField = true;
+                    }
+                    if ($column['name'] === 'updated_at') {
+                        $hasUpdatedAtField = true;
+                    }
+                    if ($column['name'] === 'created_at') {
+                        $hasCreatedAtField = true;
+                    }
+                    if ($column['name'] === 'description') {
+                        $hasDescriptionField = true;
+                    }
+                }
+                
+                if (!$hasSortOrderField) {
+                    $db->exec("ALTER TABLE items ADD COLUMN sort_order INTEGER DEFAULT 0");
+                }
+                
+                // 由于SQLite不支持在ALTER TABLE中使用非常量默认值，我们需要使用不同的方法添加时间戳列
+                if (!$hasUpdatedAtField || !$hasCreatedAtField) {
+                    try {
+                        // 创建临时表
+                        $db->exec('BEGIN TRANSACTION');
+                        $db->exec('CREATE TABLE items_temp AS SELECT * FROM items');
+                        $db->exec('DROP TABLE items');
+                        $db->exec('CREATE TABLE items (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            url TEXT NOT NULL,
+                            icon TEXT NOT NULL,
+                            category_id INTEGER DEFAULT 1,
+                            sort_order INTEGER DEFAULT 0,
+                            description TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (category_id) REFERENCES categories(id)
+                        )');
+                        $db->exec('INSERT INTO items (id, name, url, icon, category_id, sort_order, description) 
+                                  SELECT id, name, url, icon, category_id, COALESCE(sort_order, 0), description FROM items_temp');
+                        $db->exec('DROP TABLE items_temp');
+                        $db->exec('COMMIT');
+                        echo "<div class='alert alert-success'>已修复items表结构</div>";
+                    } catch (Exception $e) {
+                        $db->exec('ROLLBACK');
+                        log_error('添加时间戳列失败: ' . $e->getMessage());
+                        echo "<div class='alert alert-danger'>修复items表结构失败: {$e->getMessage()}</div>";
+                    }
+                }
+                ?>
                 <table class="link-list">
                     <thead>
                         <tr>
@@ -1074,23 +1450,60 @@ if ($themeResult) {
                             <th>链接</th>
                             <th>图标</th>
                             <th>分类</th>
+                            <th>排序</th>
+                            <th>创建/更新时间</th>
                             <th>操作</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="sortable-links">
                         <?php 
-                        // 获取所有链接
-                        $linksResult = $db->query('SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id ORDER BY i.id DESC');
+                        // 获取所有链接，按分类和排序顺序排列
+                        // 检查items表是否有sort_order列，如果没有则添加
+        $result = $db->query("PRAGMA table_info(items)");
+        $hasSortOrderField = false;
+        while ($column = $result->fetchArray(SQLITE3_ASSOC)) {
+            if ($column['name'] === 'sort_order') {
+                $hasSortOrderField = true;
+                break;
+            }
+        }
+        
+        if (!$hasSortOrderField) {
+            $db->exec("ALTER TABLE items ADD COLUMN sort_order INTEGER DEFAULT 0");
+        }
+        
+        // 按ID排序获取链接，并添加分页限制
+        $linksResult = $db->query('SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id ORDER BY i.id ASC LIMIT ' . $perPage . ' OFFSET ' . $offset);
                         while ($link = $linksResult->fetchArray(SQLITE3_ASSOC)): 
                         ?>
-                        <tr class="link-item" data-category="<?= $link['category_id'] ?>">
+                        <tr class="link-item" data-category="<?= $link['category_id'] ?>" data-id="<?= $link['id'] ?>">
                             <td data-label="ID"><?= $link['id'] ?></td>
-                            <td data-label="名称"><?= htmlspecialchars($link['name']) ?></td>
+                            <td data-label="名称">
+                                <?= htmlspecialchars($link['name']) ?>
+                                <?php if (!empty($link['description'])): ?>
+                                <div class="link-description"><?= htmlspecialchars($link['description']) ?></div>
+                                <?php endif; ?>
+                            </td>
                             <td data-label="链接"><a href="<?= $link['url'] ?>" target="_blank"><?= htmlspecialchars($link['url']) ?></a></td>
-                            <td data-label="图标"><i class="bi bi-<?= $link['icon'] ?>"></i> <?= $link['icon'] ?></td>
+                            <td data-label="图标">
+                                <?php if (strpos($link['icon'], 'layui-icon') !== false): ?>
+                                <i class="layui-icon <?= $link['icon'] ?>"></i>
+                                <?php else: ?>
+                                <i class="bi bi-<?= $link['icon'] ?>"></i>
+                                <?php endif; ?>
+                            </td>
+                            
                             <td data-label="分类"><?= htmlspecialchars($link['category_name']) ?></td>
+                            <td data-label="排序"><?= $link['sort_order'] ?></td>
+                            <td data-label="时间" class="time-info">
+                                <?php if($link['updated_at'] != $link['created_at']): ?>
+                                    更新: <?= $link['updated_at'] ?>
+                                <?php else: ?>
+                                    创建: <?= $link['created_at'] ?>
+                                <?php endif; ?>
+                            </td>
                             <td data-label="操作" class="btn-group">
-                                <button class="btn btn-primary" onclick="editLink(<?= $link['id'] ?>, '<?= htmlspecialchars($link['name']) ?>', '<?= htmlspecialchars($link['url']) ?>', '<?= $link['icon'] ?>', <?= $link['category_id'] ?>)">编辑</button>
+                                                <button class="btn btn-primary" onclick="editLink(<?= $link['id'] ?>, '<?= htmlspecialchars(addslashes($link['name'])) ?>', '<?= htmlspecialchars(addslashes($link['url'])) ?>', '<?= $link['icon'] ?>', <?= $link['category_id'] ?>, <?= $link['sort_order'] ?>, '<?= htmlspecialchars(addslashes($link['description'] ?? '')) ?>')">编辑</button>
                                 <form method="post" action="admin.php" onsubmit="return confirm('确定要删除此链接吗？')">
                                     <input type="hidden" name="action" value="delete_link">
                                     <input type="hidden" name="link_id" value="<?= $link['id'] ?>">
@@ -1101,6 +1514,34 @@ if ($themeResult) {
                         <?php endwhile; ?>
                     </tbody>
                 </table>
+                <div class="form-group" style="margin-top: 20px;">
+                    <button id="save-link-order" class="btn btn-primary">保存排序</button>
+                </div>
+                
+                <!-- 分页导航 -->
+                <div class="pagination">
+                    <div class="per-page-selector">
+                        <span>每页显示：</span>
+                        <select onchange="changePerPage(this.value)">
+                            <option value="5" <?= $perPage == 5 ? 'selected' : '' ?>>5条</option>
+                            <option value="10" <?= $perPage == 10 ? 'selected' : '' ?>>10条</option>
+                            <option value="15" <?= $perPage == 15 ? 'selected' : '' ?>>15条</option>
+                        </select>
+                    </div>
+                    <?php if($totalPages > 1): ?>
+                        <?php if($page > 1): ?>
+                            <a href="admin.php?tab=links&page=<?= $page-1 ?>&per_page=<?= $perPage ?>" class="btn btn-secondary">上一页</a>
+                        <?php endif; ?>
+                        
+                        <?php for($i = 1; $i <= $totalPages; $i++): ?>
+                            <a href="admin.php?tab=links&page=<?= $i ?>&per_page=<?= $perPage ?>" class="btn <?= $i == $page ? 'btn-primary' : 'btn-secondary' ?>"><?= $i ?></a>
+                        <?php endfor; ?>
+                        
+                        <?php if($page < $totalPages): ?>
+                            <a href="admin.php?tab=links&page=<?= $page+1 ?>&per_page=<?= $perPage ?>" class="btn btn-secondary">下一页</a>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </div>
                 
                 <!-- 编辑链接（修改）的表单 (默认隐藏) -->
                 <div id="editLinkForm" style="display: none;">
@@ -1117,8 +1558,15 @@ if ($themeResult) {
                             <input type="url" name="link_url" id="edit_link_url" required>
                         </div>
                         <div class="form-group">
+                            <label>链接简介</label>
+                            <textarea name="link_description" id="edit_link_description" class="styled-textarea" placeholder="请输入链接简介（选填）"></textarea>
+                        </div>
+                        <div class="form-group">
                             <label>图标名称</label>
-                            <input type="text" name="link_icon" id="edit_link_icon" onclick="hideIconSelector()"  required>
+                            <div class="icon-selector-input">
+                                <input type="text" name="link_icon" id="edit_link_icon" required>
+                                <button type="button" class="btn btn-secondary" onclick="showIconSelectorForInput('edit_link_icon')">选择图标</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>所属分类</label>
@@ -1127,6 +1575,10 @@ if ($themeResult) {
                                 <option value="<?= $category['id'] ?>"><?= htmlspecialchars($category['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+                        <div class="form-group">
+                            <label>排序顺序</label>
+                            <input type="number" name="sort_order" id="edit_link_sort_order" value="0">
                         </div>
                         <button type="submit" class="btn btn-primary">保存修改</button>
                         <button type="button" class="btn btn-secondary" onclick="document.getElementById('editLinkForm').style.display='none'">取消</button>
@@ -1222,8 +1674,12 @@ if ($themeResult) {
     <script>
     // 页面加载完成后执行
     document.addEventListener('DOMContentLoaded', function() {
-        // 默认显示链接管理界面
-        showTab('link');
+        // 获取当前标签页
+        const urlParams = new URLSearchParams(window.location.search);
+        const tab = urlParams.get('tab') || 'links';
+        
+        // 显示对应标签页
+        showTab(tab);
         // 初始化链接筛选，确保表格样式正确显示
         filterLinks();
     });
@@ -1233,29 +1689,35 @@ if ($themeResult) {
         // 隐藏所有内容区域
         document.getElementById('category-section').style.display = 'none';
         document.getElementById('link-section').style.display = 'none';
+        document.getElementById('add-link-section').style.display = 'none';
         document.getElementById('theme-section').style.display = 'none';
         document.getElementById('tdk-section').style.display = 'none';
         
         // 移除所有标签的活动状态
-        document.getElementById('category-tab').classList.remove('active');
-        document.getElementById('link-tab').classList.remove('active');
-        document.getElementById('theme-tab').classList.remove('active');
-        document.getElementById('tdk-tab').classList.remove('active');
+        const navLinks = document.querySelectorAll('.admin-nav a');
+        navLinks.forEach(link => {
+            link.classList.remove('active');
+        });
         
         // 显示选中的内容区域并激活对应标签
-        if (tabName === 'category') {
+        if (tabName === 'categories') {
             document.getElementById('category-section').style.display = 'block';
-            document.getElementById('category-tab').classList.add('active');
-        } else if (tabName === 'link') {
+        } else if (tabName === 'links') {
             document.getElementById('link-section').style.display = 'block';
-            document.getElementById('link-tab').classList.add('active');
+        } else if (tabName === 'add_link') {
+            document.getElementById('add-link-section').style.display = 'block';
         } else if (tabName === 'theme') {
             document.getElementById('theme-section').style.display = 'block';
-            document.getElementById('theme-tab').classList.add('active');
         } else if (tabName === 'tdk') {
             document.getElementById('tdk-section').style.display = 'block';
-            document.getElementById('tdk-tab').classList.add('active');
         }
+        
+        // 更新导航栏激活状态
+        navLinks.forEach(link => {
+            if (link.getAttribute('data-tab') === tabName) {
+                link.classList.add('active');
+            }
+        });
     }
     
     // 分类编辑函数
@@ -1267,12 +1729,14 @@ if ($themeResult) {
     }
     
     // 链接编辑（修改）函数
-    function editLink(id, name, url, icon, categoryId) {
+    function editLink(id, name, url, icon, categoryId, sortOrder, description) {
         document.getElementById('edit_link_id').value = id;
         document.getElementById('edit_link_name').value = name;
         document.getElementById('edit_link_url').value = url;
         document.getElementById('edit_link_icon').value = icon;
         document.getElementById('edit_link_category_id').value = categoryId;
+        document.getElementById('edit_link_sort_order').value = sortOrder || 0;
+        document.getElementById('edit_link_description').value = description || '';
         document.getElementById('editLinkForm').style.display = 'block';
         
         // 滚动到编辑表单
@@ -1284,11 +1748,28 @@ if ($themeResult) {
         const previewContainer = document.querySelector('.preview-container');
         previewContainer.setAttribute('data-theme', theme);
         
-        // 如果选择了自定义主题，显示自定义主题设置
+        // 如果选择了自定义主题，显示自定义主题设置并更新预览
         var customThemeSettings = document.getElementById('custom-theme-settings');
         if (customThemeSettings) {
             customThemeSettings.style.display = theme === 'custom' ? 'block' : 'none';
+            if (theme === 'custom') {
+                updateCustomThemePreview();
+            }
         }
+    }
+    
+    // 更新自定义主题预览
+    function updateCustomThemePreview() {
+        const previewContainer = document.querySelector('.preview-container');
+        const primaryColor = document.querySelector('input[name="custom_colors[primary-color]"]').value;
+        const bgColor = document.querySelector('input[name="custom_colors[bg-color]"]').value;
+        const cardBg = document.querySelector('input[name="custom_colors[card-bg]"]').value;
+        const textColor = document.querySelector('input[name="custom_colors[text-color]"]').value;
+        
+        previewContainer.style.setProperty('--primary-color', primaryColor);
+        previewContainer.style.setProperty('--bg-color', bgColor);
+        previewContainer.style.setProperty('--card-bg', cardBg);
+        previewContainer.style.setProperty('--text-color', textColor);
     }
     
     // 更新颜色值显示
@@ -1308,9 +1789,176 @@ if ($themeResult) {
                 if (colorValueSpan && colorValueSpan.classList.contains('color-value')) {
                     colorValueSpan.textContent = this.value;
                 }
+                
+                // 实时更新主题预览
+                if (document.getElementById('theme-selector').value === 'custom') {
+                    updateCustomThemePreview();
+                }
+                
+                // 自动隐藏颜色选择器
+                this.blur();
             });
         });
+        
+        // 初始化分类排序 - 使用原生JavaScript实现拖拽排序
+        var categoriesList = document.getElementById('sortable-categories');
+        if (categoriesList) {
+            enableDragSort('sortable-categories');
+        }
+        
+        // 初始化链接排序 - 使用原生JavaScript实现拖拽排序
+        var linksList = document.getElementById('sortable-links');
+        if (linksList) {
+            enableDragSort('sortable-links');
+        }
+        
+        
+        // 保存分类排序
+        var saveCategoryOrderBtn = document.getElementById('save-category-order');
+        if (saveCategoryOrderBtn) {
+            saveCategoryOrderBtn.addEventListener('click', function() {
+                const rows = document.querySelectorAll('#sortable-categories tr');
+                const categoryOrder = [];
+                
+                rows.forEach((row, index) => {
+                    categoryOrder.push(row.getAttribute('data-id'));
+                });
+                
+                // 发送排序数据到服务器
+                const formData = new FormData();
+                formData.append('action', 'update_category_order');
+                categoryOrder.forEach((id, index) => {
+                    formData.append('category_order[' + index + ']', id);
+                });
+                
+                fetch('admin.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 使用layer提示
+                        layer.msg('分类排序已保存', {time: 1000});
+                    } else {
+                        layer.msg('保存排序失败', {icon: 2});
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('保存排序时发生错误');
+                });
+            });
+        }
+        
+        // 保存链接排序
+        var saveLinkOrderBtn = document.getElementById('save-link-order');
+        if (saveLinkOrderBtn) {
+            saveLinkOrderBtn.addEventListener('click', function() {
+                const rows = document.querySelectorAll('#sortable-links tr');
+                const linkOrder = [];
+                
+                rows.forEach((row, index) => {
+                    linkOrder.push(row.getAttribute('data-id'));
+                });
+                
+                // 发送排序数据到服务器
+                const formData = new FormData();
+                formData.append('action', 'update_link_order');
+                linkOrder.forEach((id, index) => {
+                    formData.append('link_order[' + index + ']', id);
+                });
+                
+                fetch('admin.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 使用layer提示
+                        layer.msg('链接排序已保存', {time: 1000});
+                    } else {
+                        layer.msg('保存排序失败', {icon: 2});
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('保存排序时发生错误');
+                });
+            });
+        }
     })
+    
+    // 原生JavaScript拖拽排序实现
+    function enableDragSort(listId) {
+        const sortableList = document.getElementById(listId);
+        const rows = sortableList.querySelectorAll('tr');
+        let draggedItem = null;
+        
+        rows.forEach(row => {
+            // 设置可拖拽
+            row.setAttribute('draggable', 'true');
+            
+            // 拖拽开始
+            row.addEventListener('dragstart', function(e) {
+                draggedItem = this;
+                setTimeout(() => {
+                    this.style.opacity = '0.4';
+                }, 0);
+            });
+            
+            // 拖拽结束
+            row.addEventListener('dragend', function() {
+                draggedItem = null;
+                this.style.opacity = '1';
+                
+                // 更新排序显示
+                const allRows = sortableList.querySelectorAll('tr');
+                allRows.forEach((row, index) => {
+                    const sortCell = row.querySelector('td[data-label="排序"]');
+                    if (sortCell) {
+                        sortCell.textContent = index;
+                    }
+                });
+            });
+            
+            // 拖拽经过
+            row.addEventListener('dragover', function(e) {
+                e.preventDefault();
+            });
+            
+            // 放置目标
+            row.addEventListener('drop', function(e) {
+                e.preventDefault();
+                if (draggedItem && this !== draggedItem) {
+                    // 确定放置位置
+                    const allRows = Array.from(sortableList.querySelectorAll('tr'));
+                    const draggedPos = allRows.indexOf(draggedItem);
+                    const targetPos = allRows.indexOf(this);
+                    
+                    if (draggedPos < targetPos) {
+                        this.parentNode.insertBefore(draggedItem, this.nextSibling);
+                    } else {
+                        this.parentNode.insertBefore(draggedItem, this);
+                    }
+                }
+            });
+            
+            // 拖拽进入
+            row.addEventListener('dragenter', function(e) {
+                e.preventDefault();
+                if (this !== draggedItem) {
+                    this.style.borderTop = '2px solid var(--primary-color)';
+                }
+            });
+            
+            // 拖拽离开
+            row.addEventListener('dragleave', function() {
+                this.style.borderTop = '';
+            });
+        });
+    }
     
     // 按分类筛选链接
     function filterLinks() {
@@ -1324,6 +1972,11 @@ if ($themeResult) {
                 item.style.display = 'none';
             }
         });
+    }
+    
+    // 更改每页显示条数
+    function changePerPage(perPage) {
+        window.location.href = 'admin.php?tab=links&page=1&per_page=' + perPage;
     }
     
     // 显示用户设置模态框
@@ -1342,6 +1995,13 @@ if ($themeResult) {
         loadIcons();
     }
     
+    // 为特定输入框显示图标选择器
+    function showIconSelectorForInput(inputId) {
+        currentIconInput = inputId;
+        document.getElementById('iconSelectorModal').style.display = 'block';
+        loadIcons();
+    }
+    
     // 隐藏图标选择器模态框
     function hideIconSelector() {
         document.getElementById('iconSelectorModal').style.display = 'none';
@@ -1356,6 +2016,17 @@ if ($themeResult) {
             document.getElementById('layuiIcons').style.display = 'none';
             document.getElementById('bootstrapIcons').style.display = 'grid';
         }
+    }
+    
+    // 当前选中的输入框ID
+    let currentIconInput = '';
+    
+    // 选择图标并填充到输入框
+    function selectIcon(iconName) {
+        if (currentIconInput) {
+            document.getElementById(currentIconInput).value = iconName;
+        }
+        hideIconSelector();
     }
     
     // 加载图标
@@ -1417,6 +2088,7 @@ if ($themeResult) {
         layuiIconList.forEach(icon => {
             const iconElement = document.createElement('div');
             iconElement.className = 'icon-item';
+            iconElement.onclick = function() { selectIcon(icon); };
             
             iconElement.innerHTML = `
                 <i class="layui-icon ${icon}" style="font-size: 24px;"></i>
@@ -1424,10 +2096,9 @@ if ($themeResult) {
             `;
             
             iconElement.onclick = function() {
-                copyToClipboard(icon);
-                // 自动填充到图标输入框
-                if(document.getElementById('edit_link_icon')) {
-                    document.getElementById('edit_link_icon').value = icon;
+                // 自动填充到当前选中的图标输入框
+                if(currentIconInput) {
+                    document.getElementById(currentIconInput).value = icon;
                 }
                 hideIconSelector();
             };
@@ -1439,6 +2110,7 @@ if ($themeResult) {
         bootstrapIconList.forEach(icon => {
             const iconElement = document.createElement('div');
             iconElement.className = 'icon-item';
+            iconElement.onclick = function() { selectIcon('bi-'+icon); };
             
             iconElement.innerHTML = `
                 <i class="bi bi-${icon}" style="font-size: 24px;"></i>
@@ -1446,10 +2118,9 @@ if ($themeResult) {
             `;
             
             iconElement.onclick = function() {
-                copyToClipboard(icon);
-                // 自动填充到图标输入框
-                if(document.getElementById('edit_link_icon')) {
-                    document.getElementById('edit_link_icon').value = icon;
+                // 自动填充到当前选中的图标输入框
+                if(currentIconInput) {
+                    document.getElementById(currentIconInput).value = icon;
                 }
                 hideIconSelector();
             };
@@ -1513,24 +2184,14 @@ if ($themeResult) {
         }, 2000);
     }
 
-    // 为图标名称输入框绑定点击事件
+    // 图标选择器初始化
     document.addEventListener('DOMContentLoaded', function() {
-        const iconInput = document.getElementById('edit_link_icon');
-        if (iconInput) {
-            iconInput.onclick = function() {
-                showIconSelector();
-            };
-        }
+        // 初始化图标选择器
+        loadIcons();
+        
+        // 默认显示Layui图标
+        showIconType('layui');
     });
-
-    // 图标选择逻辑
-    function selectIcon(iconName) {
-        const iconInput = document.getElementById('edit_link_icon');
-        if (iconInput) {
-            iconInput.value = iconName;
-        }
-        hideIconSelector();
-    }
 
     // 修改图标选择器的点击事件处理
     document.addEventListener('DOMContentLoaded', function() {

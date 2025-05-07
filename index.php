@@ -9,12 +9,12 @@ session_save_path('sessions');
 $db = new SQLite3('data/nav.db');
 
 // 初始化数据库
-$db->exec('CREATE TABLE IF NOT EXISTS config (
+// 创建主题配置表
+$db->exec('CREATE TABLE IF NOT EXISTS theme_config (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    theme TEXT NOT NULL,
-    description TEXT,  
-    keywords TEXT      
+    theme TEXT NOT NULL DEFAULT "light",
+    custom_colors TEXT,
+    show_admin_icon INTEGER DEFAULT 1
 )');
 
 
@@ -22,7 +22,9 @@ $db->exec('CREATE TABLE IF NOT EXISTS config (
 $db->exec('CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    sort_order INTEGER DEFAULT 0
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )');
 
 $db->exec('CREATE TABLE IF NOT EXISTS items (
@@ -31,6 +33,9 @@ $db->exec('CREATE TABLE IF NOT EXISTS items (
     url TEXT NOT NULL,
     icon TEXT NOT NULL,
     category_id INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES categories(id)
 )');
 
@@ -40,24 +45,29 @@ $db->exec('CREATE TABLE IF NOT EXISTS users (
     password TEXT NOT NULL
 )');
 
-// 创建config表（包含TDK和自定义主题字段）
-$db->exec('CREATE TABLE IF NOT EXISTS config (
+// 创建TDK配置表
+$db->exec('CREATE TABLE IF NOT EXISTS tdk_config (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    theme TEXT NOT NULL,
-    description TEXT,
-    keywords TEXT,
-    custom_colors TEXT  -- 用于存储自定义配色
+    title TEXT NOT NULL DEFAULT "我的导航",
+    description TEXT DEFAULT "",
+    keywords TEXT DEFAULT ""
 )');
 
 // 读取配置
 $config = ['title' => '我的导航', 'theme' => 'light', 'description' => '', 'keywords' => '', 'custom_colors' => null, 'items' => []];
 
-// 检查是否有配置数据
-$result = $db->querySingle('SELECT COUNT(*) FROM config', true);
+// 检查是否有TDK配置数据
+$result = $db->querySingle('SELECT COUNT(*) FROM tdk_config', true);
 if ($result['COUNT(*)'] == 0) {
-    // 插入默认配置
-    $db->exec("INSERT INTO config (title, theme) VALUES ('我的导航', 'light')");
+    // 插入默认TDK配置
+    $db->exec("INSERT INTO tdk_config (title, description, keywords) VALUES ('我的导航', '', '')");
+}
+
+// 检查是否有主题配置数据
+$result = $db->querySingle('SELECT COUNT(*) FROM theme_config', true);
+if ($result['COUNT(*)'] == 0) {
+    // 插入默认主题配置
+    $db->exec("INSERT INTO theme_config (theme, custom_colors) VALUES ('light', NULL)");
     
     // 插入默认项目
     $defaultItems = [
@@ -73,13 +83,17 @@ if ($result['COUNT(*)'] == 0) {
     }
 }
 
-// 获取当前配置
-$configRow = $db->querySingle('SELECT * FROM config LIMIT 1', true);
-$config['title'] = $configRow['title'];
-$config['theme'] = $configRow['theme'];
-$config['description'] = $configRow['description'] ?? '';  // 获取description
-$config['keywords'] = $configRow['keywords'] ?? '';        // 获取keywords
-$config['custom_colors'] = $configRow['custom_colors'] ?? null;  // 获取自定义主题配色
+// 获取当前TDK配置
+$tdkConfigRow = $db->querySingle('SELECT * FROM tdk_config LIMIT 1', true);
+$config['title'] = $tdkConfigRow['title'];
+$config['description'] = $tdkConfigRow['description'] ?? '';  // 获取description
+$config['keywords'] = $tdkConfigRow['keywords'] ?? '';        // 获取keywords
+
+// 获取当前主题配置
+$themeConfigRow = $db->querySingle('SELECT * FROM theme_config LIMIT 1', true);
+$config['theme'] = $themeConfigRow['theme'];
+$config['custom_colors'] = $themeConfigRow['custom_colors'] ?? null;  // 获取自定义主题配色
+$config['show_admin_icon'] = isset($themeConfigRow['show_admin_icon']) ? (int)$themeConfigRow['show_admin_icon'] : 1;  // 获取管理图标显示设置
 
 // 获取分类列表
 $categoriesResult = $db->query('SELECT * FROM categories ORDER BY sort_order ASC');
@@ -231,12 +245,14 @@ foreach ($config['categories'] as $category) {
             </div>
             <?php endforeach; ?>
             
+            <?php if ($config['show_admin_icon'] == 1): ?>
             <div class="admin-actions">
                 <a href="admin.php" class="nav-item admin-btn" aria-label="管理">
                     <i class="bi bi-gear"></i>
                     <span>管理</span>
                 </a>
             </div>
+            <?php endif; ?>
         </main>
         
         <footer class="site-footer">

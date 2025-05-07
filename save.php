@@ -14,7 +14,7 @@ function log_error($message) {
 // 获取TDK（标题、描述、关键词）内容
 function get_tdk() {
     global $db;
-    $result = $db->query('SELECT title, description, keywords FROM config LIMIT 1');
+    $result = $db->query('SELECT title, description, keywords FROM tdk_config LIMIT 1');
     $tdk = $result->fetchArray(SQLITE3_ASSOC);
     return $tdk ?: ['title' => '', 'description' => '', 'keywords' => ''];
 }
@@ -51,13 +51,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $keywords = $_POST['keywords'] ?? '';
     $custom_colors = isset($_POST['custom_colors']) ? json_encode($_POST['custom_colors']) : null;
     
-    // 更新配置表中的主题设置和TDK
-    $stmt = $db->prepare('UPDATE config SET theme = :theme, title = :title, description = :description, keywords = :keywords, custom_colors = :custom_colors');
+    // 更新主题配置表中的主题设置
+    $stmt = $db->prepare('UPDATE theme_config SET theme = :theme, custom_colors = :custom_colors');
     $stmt->bindValue(':theme', $theme, SQLITE3_TEXT);
+    $stmt->bindValue(':custom_colors', $custom_colors, SQLITE3_TEXT);
+    $stmt->execute();
+    
+    // 更新TDK配置表中的TDK设置
+    $stmt = $db->prepare('UPDATE tdk_config SET title = :title, description = :description, keywords = :keywords');
     $stmt->bindValue(':title', $title, SQLITE3_TEXT);
     $stmt->bindValue(':description', $description, SQLITE3_TEXT);
     $stmt->bindValue(':keywords', $keywords, SQLITE3_TEXT);
-    $stmt->bindValue(':custom_colors', $custom_colors, SQLITE3_TEXT);
     $stmt->execute();
     
     header('Location: admin.php');
@@ -70,8 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $description = $_POST['description'] ?? '';
     $keywords = $_POST['keywords'] ?? '';
     
-    // 更新配置表中的TDK设置
-    $stmt = $db->prepare('UPDATE config SET title = :title, description = :description, keywords = :keywords');
+    // 更新TDK配置表中的TDK设置
+    $stmt = $db->prepare('UPDATE tdk_config SET title = :title, description = :description, keywords = :keywords');
     $stmt->bindValue(':title', $title, SQLITE3_TEXT);
     $stmt->bindValue(':description', $description, SQLITE3_TEXT);
     $stmt->bindValue(':keywords', $keywords, SQLITE3_TEXT);
@@ -87,12 +91,16 @@ if ($data !== null) {
     $db->exec('BEGIN');
     
     try {
-        // 更新配置
-        $stmt = $db->prepare('UPDATE config SET title = :title, theme = :theme, description = :description, keywords = :keywords, custom_colors = :custom_colors');
+        // 更新TDK配置
+        $stmt = $db->prepare('UPDATE tdk_config SET title = :title, description = :description, keywords = :keywords');
         $stmt->bindValue(':title', $data['title'], SQLITE3_TEXT);
-        $stmt->bindValue(':theme', $data['theme'], SQLITE3_TEXT);
         $stmt->bindValue(':description', $data['description'] ?? '', SQLITE3_TEXT);
         $stmt->bindValue(':keywords', $data['keywords'] ?? '', SQLITE3_TEXT);
+        $stmt->execute();
+        
+        // 更新主题配置
+        $stmt = $db->prepare('UPDATE theme_config SET theme = :theme, custom_colors = :custom_colors');
+        $stmt->bindValue(':theme', $data['theme'], SQLITE3_TEXT);
         $stmt->bindValue(':custom_colors', isset($data['custom_colors']) ? json_encode($data['custom_colors']) : null, SQLITE3_TEXT);
         $stmt->execute();
     
